@@ -135,6 +135,7 @@ func (w *Worker) setError(err error, critical bool) {
 	w.errOnce.Do(func() {
 		w.err = err
 		w.doneCh <- struct{}{}
+		close(w.doneCh)
 	})
 }
 
