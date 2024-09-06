@@ -210,12 +210,14 @@ func (w *Worker) Wait() error {
 
 			if err != nil {
 				w.setError(err, false)
+				w.counter.Store(w.counter.Load() - 1)
 				return
 			}
 			w.doneCounter.Add(1)
 
 			if w.doneCounter.CompareAndSwap(w.counter.Load(), 0) {
 				w.doneCh <- struct{}{}
+				close(w.doneCh)
 			}
 		}
 	}()
@@ -274,7 +276,6 @@ func (w *Worker) Wait() error {
 }
 
 func (w *Worker) Close() {
-	close(w.doneCh)
 	close(w.decodeCh)
 	close(w.nameCh)
 	close(w.token)
