@@ -1,10 +1,10 @@
-package main
+package re
 
 import "regexp"
 
-var commitRegExp = regexp.MustCompile(`https://github\.com/(?P<org>.*)/(?P<repo>.*)/commit/(?P<commit>.{40})`)
+var GithubCommit = regexp.MustCompile(`https://github\.com/(?P<org>.*)/(?P<repo>.*)/commit/(?P<commit>.{40})`)
 
-func regexpSearch(pattern *regexp.Regexp, s string) (res map[string]string, ok bool) {
+func Search(pattern *regexp.Regexp, s string) (res map[string]string, ok bool) {
 	match := pattern.FindStringSubmatch(s)
 
 	if match == nil {

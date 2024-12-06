@@ -1,4 +1,4 @@
-package main
+package worker
 
 import (
 	"cloud.google.com/go/storage"
@@ -6,51 +6,47 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	log "github.com/sirupsen/logrus"
+	"github.com/gaarutyunov/osv-exporter/filter"
+	"github.com/gaarutyunov/osv-exporter/osv"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/api/iterator"
 	"io"
 	"sync"
 	"sync/atomic"
 )
 
-type (
-	token struct{}
+type token struct{}
 
-	VulnerabilityParser interface {
-		Parse(ctx context.Context, vulnerability *Vulnerability) error
-	}
+type VulnerabilityParser interface {
+	Parse(ctx context.Context, vulnerability *osv.Vulnerability) error
+}
 
-	VulnerabilityFilter interface {
-		Filter(ctx context.Context, vulnerability *Vulnerability) (bool, error)
-	}
+type prefixAndName [2]string
 
-	PrefixAndName [2]string
+type Worker struct {
+	*storage.BucketHandle
 
-	Worker struct {
-		*storage.BucketHandle
+	defaultParser VulnerabilityParser
 
-		defaultParser VulnerabilityParser
+	parsers map[string]VulnerabilityParser
+	filters []filter.Vulnerability
 
-		parsers map[string]VulnerabilityParser
-		filters []VulnerabilityFilter
+	ctx context.Context
 
-		ctx context.Context
+	doneCh   chan struct{}
+	decodeCh chan *osv.Vulnerability
+	nameCh   chan prefixAndName
+	token    chan token
 
-		doneCh   chan struct{}
-		decodeCh chan *Vulnerability
-		nameCh   chan PrefixAndName
-		token    chan token
+	counter     atomic.Uint32
+	doneCounter atomic.Uint32
 
-		counter     atomic.Uint32
-		doneCounter atomic.Uint32
+	err error
 
-		err error
+	failErr bool
 
-		failErr bool
-
-		errOnce sync.Once
-	}
-)
+	errOnce sync.Once
+}
 
 func NewWorker(ctx context.Context, bucket *storage.BucketHandle, defaultParser VulnerabilityParser, opts ...func(worker *Worker)) *Worker {
 	w := &Worker{
@@ -58,8 +54,8 @@ func NewWorker(ctx context.Context, bucket *storage.BucketHandle, defaultParser 
 		defaultParser: defaultParser,
 		ctx:           ctx,
 		doneCh:        make(chan struct{}),
-		decodeCh:      make(chan *Vulnerability),
-		nameCh:        make(chan PrefixAndName),
+		decodeCh:      make(chan *osv.Vulnerability),
+		nameCh:        make(chan prefixAndName),
 		failErr:       true,
 		token:         nil,
 	}
@@ -71,7 +67,7 @@ func NewWorker(ctx context.Context, bucket *storage.BucketHandle, defaultParser 
 	return w
 }
 
-func WithVulnerabilityFilters(filters ...VulnerabilityFilter) func(worker *Worker) {
+func WithFilters(filters ...filter.Vulnerability) func(worker *Worker) {
 	return func(worker *Worker) {
 		worker.filters = append(worker.filters, filters...)
 	}
@@ -117,8 +113,8 @@ func WithParser(prefix string, parser VulnerabilityParser) func(worker *Worker) 
 	}
 }
 
-func (w *Worker) Parse(ctx context.Context, v *Vulnerability) error {
-	p, ok := w.parsers[v.prefix]
+func (w *Worker) Parse(ctx context.Context, v *osv.Vulnerability) error {
+	p, ok := w.parsers[v.Prefix]
 	if !ok {
 		return w.defaultParser.Parse(ctx, v)
 	}
@@ -128,7 +124,7 @@ func (w *Worker) Parse(ctx context.Context, v *Vulnerability) error {
 
 func (w *Worker) setError(err error, critical bool) {
 	if !critical && !w.failErr {
-		log.Error(err)
+		logrus.Error(err)
 		return
 	}
 
@@ -165,7 +161,7 @@ func (w *Worker) Search(prefix string) {
 			return
 		}
 
-		w.nameCh <- PrefixAndName{prefix, attrs.Name}
+		w.nameCh <- prefixAndName{prefix, attrs.Name}
 	}
 }
 
@@ -233,7 +229,7 @@ func (w *Worker) Wait() error {
 				}
 
 				var reader io.Reader
-				v := NewVulnerability(prefixAndName[0])
+				v := osv.NewVulnerability(prefixAndName[0])
 
 				err := w.wrap(func() (err error) {
 					reader, err = w.Object(prefixAndName[1]).NewReader(w.ctx)
@@ -255,8 +251,8 @@ func (w *Worker) Wait() error {
 					return
 				}
 
-				for _, filter := range w.filters {
-					if ok, err := filter.Filter(w.ctx, v); err != nil {
+				for _, vulnerabilityFilter := range w.filters {
+					if ok, err := vulnerabilityFilter.Filter(w.ctx, v); err != nil {
 						w.setError(err, false)
 						return
 					} else if ok {

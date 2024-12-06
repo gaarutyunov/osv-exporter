@@ -1,4 +1,4 @@
-package main
+package exporter
 
 import (
 	"bufio"
@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/bluekeyes/go-gitdiff/gitdiff"
+	"github.com/gaarutyunov/osv-exporter/osv"
+	"github.com/gaarutyunov/osv-exporter/vcs"
 	"github.com/google/go-github/v63/github"
 	"github.com/stretchr/testify/assert"
 	"net/http"
@@ -14,8 +16,8 @@ import (
 	"testing"
 )
 
-func getVulnerability(url string) (*Vulnerability, error) {
-	var vuln Vulnerability
+func getVulnerability(url string) (*osv.Vulnerability, error) {
+	var vuln osv.Vulnerability
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -35,12 +37,12 @@ func TestRepositoryAll(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := UpdateRateLimit(ctx, client, true)
+	err := vcs.UpdateRateLimit(ctx, client, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	repo := newRepository(client.Repositories, "django", "django")
+	repo := vcs.NewRepository(client.Repositories, "django", "django")
 
 	outDir := t.TempDir()
 
@@ -80,10 +82,20 @@ func TestRepositoryAll(t *testing.T) {
 		t.Fatalf("%q file not found", filePath)
 	}
 
-	err = repo.ExportChanges(ctx, vuln, outDir, oldFile, file)
+	exporter := Meta()
+
+	err = exporter.Export(ctx, vuln, outDir, oldFile, file)
 	if err != nil {
-		t.Fatalf("ExportChanges(%q, %q): %v", sha, filePath, err)
+		t.Fatalf("Export(%q, %q): %v", sha, filePath, err)
 	}
+
+	outDir = MetaExporterPath(
+		outDir,
+		oldFile.GetOrganization(),
+		oldFile.GetRepository(),
+		oldFile.GetSHA(),
+		file.NewName,
+	)
 
 	assert.FileExists(t, filepath.Join(outDir, "meta.json"))
 	assert.FileExists(t, filepath.Join(outDir, "old.py"))
@@ -94,7 +106,7 @@ func TestRepositoryAll(t *testing.T) {
 		t.Fatalf("os.ReadFile(%q): %v", filePath, err)
 	}
 
-	var meta Meta
+	var meta MetaContent
 
 	err = json.Unmarshal(metaRaw, &meta)
 	if err != nil {

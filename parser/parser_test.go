@@ -1,15 +1,34 @@
-package main
+package parser
 
 import (
 	"context"
 	"encoding/json"
+	"github.com/gaarutyunov/osv-exporter/exporter"
+	"github.com/gaarutyunov/osv-exporter/filter"
+	"github.com/gaarutyunov/osv-exporter/osv"
 	"github.com/google/go-github/v63/github"
 	"github.com/stretchr/testify/assert"
-	"net/url"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func getVulnerability(url string) (*osv.Vulnerability, error) {
+	var vuln osv.Vulnerability
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&vuln)
+	if err != nil {
+		return nil, err
+	}
+
+	return &vuln, nil
+}
 
 func TestParserAll(t *testing.T) {
 	client := github.NewClient(nil).WithAuthToken(os.Getenv("GITHUB_TOKEN"))
@@ -18,7 +37,7 @@ func TestParserAll(t *testing.T) {
 
 	outDir := t.TempDir()
 
-	parser := NewParser(client, outDir, WithFileFilters(NewExtensionFilter(".py")))
+	parser := NewParser(client, outDir, WithFilters(filter.Extension(".py")))
 
 	const vulnURL = "https://raw.githubusercontent.com/github/advisory-database/main/advisories/github-reviewed/2024/07/GHSA-cgcg-p68q-3w7v/GHSA-cgcg-p68q-3w7v.json"
 
@@ -32,10 +51,15 @@ func TestParserAll(t *testing.T) {
 		t.Fatalf("Error parsing vulnerability: %v", err)
 	}
 
-	filePath := url.QueryEscape("libs/experimental/langchain_experimental/sql/vector_sql.py")
-	const sha = "7b13292e3544b2f5f2bfb8a27a062ea2b0c34561"
+	const sha = "b809c243afb182efc5868ca495074a41e2f7c40c"
 
-	parsedDir := filepath.Join(outDir, "langchain-ai.langchain", sha, filePath)
+	parsedDir := exporter.MetaExporterPath(
+		outDir,
+		"langchain-ai",
+		"langchain",
+		sha,
+		"libs/experimental/langchain_experimental/sql/vector_sql.py",
+	)
 
 	assert.DirExists(t, parsedDir)
 	assert.FileExists(t, filepath.Join(parsedDir, "meta.json"))
@@ -44,14 +68,14 @@ func TestParserAll(t *testing.T) {
 
 	metaRaw, err := os.ReadFile(filepath.Join(parsedDir, "meta.json"))
 	if err != nil {
-		t.Fatalf("os.ReadFile(%q): %v", filePath, err)
+		t.Fatal(err)
 	}
 
-	var meta Meta
+	var meta exporter.MetaContent
 
 	err = json.Unmarshal(metaRaw, &meta)
 	if err != nil {
-		t.Fatalf("json.Unmarshal(%q): %v", filePath, err)
+		t.Fatal(err)
 	}
 
 	assert.Equal(t, []int64{11, 79, 80, 81, 82, 83, 84, 85, 90, 91, 92, 93, 94, 95}, meta.BadLines)

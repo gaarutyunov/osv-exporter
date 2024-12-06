@@ -1,4 +1,4 @@
-package main
+package vcs
 
 import "github.com/bluekeyes/go-gitdiff/gitdiff"
 

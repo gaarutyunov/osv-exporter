@@ -1,4 +1,4 @@
-module github.com/gaarutyunov/ovs-exporter
+module github.com/gaarutyunov/osv-exporter
 
 go 1.21
 

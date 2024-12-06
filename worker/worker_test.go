@@ -1,9 +1,12 @@
-package main
+package worker
 
 import (
 	"bufio"
 	"cloud.google.com/go/storage"
 	"context"
+	"github.com/gaarutyunov/osv-exporter/filter"
+	"github.com/gaarutyunov/osv-exporter/osv"
+	"github.com/gaarutyunov/osv-exporter/parser"
 	"github.com/google/go-github/v63/github"
 	"google.golang.org/api/option"
 	"os"
@@ -79,7 +82,7 @@ func TestWorkerAll(t *testing.T) {
 		t.Fatalf("Failed to create storageClient: %v", err)
 	}
 
-	bucket := storageClient.Bucket(bucket)
+	bucket := storageClient.Bucket("osv-vulnerabilities")
 
 	githubCilent := github.NewClient(nil).WithAuthToken(os.Getenv("GITHUB_TOKEN"))
 
@@ -88,10 +91,10 @@ func TestWorkerAll(t *testing.T) {
 	worker := NewWorker(
 		ctx,
 		bucket,
-		NewParser(
+		parser.NewParser(
 			githubCilent,
 			outDir,
-			WithFileFilters(NewExtensionFilter(
+			parser.WithFilters(filter.Extension(
 				".py",
 				".java",
 				".c",
@@ -105,8 +108,7 @@ func TestWorkerAll(t *testing.T) {
 				".kts",
 			)),
 		),
-		WithVulnerabilityFilters(NewSeverityFilter(Low), NewFixFilter()),
-		WithLimit(20),
+		WithFilters(filter.Severity(osv.Low), filter.Fixed()),
 	)
 
 	roots := []string{"PyPI", "Alpine", "npm", "Maven"}
